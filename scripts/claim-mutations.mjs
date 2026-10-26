@@ -20,9 +20,29 @@ const RESULT_ROOT = path.join(ROOT, "test-results", "claim-mutations");
 const HEAD = git(["rev-parse", "HEAD"]).trim();
 const CHILD_ENV = { ...process.env, CI: "1", FORCE_COLOR: "0" };
 
+/**
+ * Both runners take their name filter as a REGULAR EXPRESSION, so an assertion
+ * title containing `+`, `(`, `?` or `.` silently selects nothing. A filter that
+ * matches no test exits zero, which the gate would read as "the mutant
+ * survived" -- or worse, on the restored run, as "the assertion passed". The
+ * first mutation in this file hit exactly that: its title ends "T = 2D/v +
+ * delta_P", and the bare `+` turned the pattern into "one or more spaces".
+ * Escaping makes the title a literal, and `ranTests` below refuses a run that
+ * executed nothing.
+ */
+const literal = (id) => id.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+
 const unit = (file, id) => ({
   program: "npx",
-  args: ["--no-install", "vitest", "run", file, "-t", id, "--reporter=verbose"],
+  args: [
+    "--no-install",
+    "vitest",
+    "run",
+    file,
+    "-t",
+    literal(id),
+    "--reporter=verbose",
+  ],
   assertion: id,
 });
 const browser = (id) => ({
@@ -33,13 +53,25 @@ const browser = (id) => ({
     "test",
     "claims.spec.ts",
     "--grep",
-    id,
+    literal(id),
     "--workers=1",
     "--retries=0",
     "--reporter=line",
   ],
   assertion: id,
 });
+
+/** A run that executed no test proves nothing, whatever its exit status. */
+function ranTests(result) {
+  if (/No test files found|No tests found/i.test(result.output)) return false;
+  const vitest = /Tests\s+(?:\d+\s+failed\s*\|\s*)?(\d+)\s+passed/.exec(
+    result.output,
+  );
+  const vitestNone = /Tests\s+no tests/i.test(result.output);
+  if (vitestNone) return false;
+  const playwright = /(\d+)\s+(?:passed|failed)/.exec(result.output);
+  return Boolean(vitest || playwright);
+}
 
 const MUTATIONS = [
   {
@@ -265,6 +297,11 @@ function build(label) {
 
 function targetFailureIsOwned(result, mutation) {
   const { id, target } = mutation;
+  if (!ranTests(result)) {
+    throw new Error(
+      `${id}: the owning assertion selected no test, so neither outcome means anything\n${result.output.slice(0, 2000)}`,
+    );
+  }
   if (result.status === 0) return false;
   if (result.status !== 1 || result.signal || result.error) {
     throw new Error(
@@ -455,6 +492,10 @@ function main() {
             mutation.target.args.includes("playwright") ? 900_000 : 300_000,
           );
           mustPass(restoredTarget);
+          requireCondition(
+            ranTests(restoredTarget),
+            `${mutation.id}: the restored owning assertion selected no test`,
+          );
           assertClean();
           evidence.restoration = {
             sourceSha256: sha256(fs.readFileSync(targetPath)),
