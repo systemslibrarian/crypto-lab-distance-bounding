@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.log
+chat.md
+.env
+.env.local
+
+# Playwright
+/test-results/
+/playwright-report/
+/.pw-browsers/

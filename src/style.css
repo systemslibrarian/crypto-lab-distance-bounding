@@ -1,0 +1,574 @@
+/*
+ * The fleet contract pins one dark theme. There is no toggle and no stored or
+ * operating-system preference that can silently change the learner palette.
+ *
+ * Every colour below is a token defined once on :root for the dark scheme and
+ * no rule elsewhere needs to branch on a second palette.
+ */
+:root {
+  color-scheme: dark;
+
+  --accent: #35d6bb;
+  --bg: #071311;
+  --panel: #0d1d1a;
+  --panel-2: #112622;
+  --ink: #e8fff9;
+  --ink-dim: #a7c7bf;
+  --line: #1e3a34;
+  /* WCAG 1.4.11 needs 3:1 for the boundary of a control against its surround.
+     --line is a quiet divider for panels and table rules and is deliberately
+     below that; a control border must not borrow it. */
+  --control-line: #7aa79e;
+  --ok: #4ade80;
+  --ok-ink: #062a14;
+  --bad: #ff8d8d;
+  --bad-ink: #3a0a0a;
+  --warn: #ffd166;
+  --warn-ink: #332200;
+  --focus: #8df3dd;
+
+  --radius: 12px;
+  --gap: clamp(0.75rem, 2vw, 1.25rem);
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/*
+ * Available to assistive technology, absent from the visual layout. The table
+ * captions in `src/ui/dom.ts` already carry this class, so without the rule
+ * every evidence table would print a duplicate heading.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  line-height: 1.55;
+}
+
+/*
+ * The skip link is the header's first child. Unfocused it sits off-screen
+ * above the header at full size; focused it becomes an ordinary flex item.
+ *
+ * Three earlier shapes each failed a real check, and the comments are here so
+ * none of them is reintroduced. Overlaying the header while focused left the
+ * brand partially obscured, and an obscured label cannot be measured for
+ * contrast at all. Taking layout space at the top of the document reflowed
+ * every control below it the instant focus left, so a pointer press begun
+ * before the shift landed on the wrong element. Collapsing to zero width made
+ * it a focusable target that paints nothing. Off-screen at full size, then in
+ * flow when focused, is the shape that satisfies all three: the header row's
+ * height is set by the 40px badge, so entering the flow changes nothing below.
+ */
+.skip-link {
+  position: absolute;
+  top: -4rem;
+  left: 0.5rem;
+  order: -1;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: var(--ink);
+  padding: 0.5rem 0.8rem;
+  color: var(--bg);
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  position: static;
+}
+
+/* ---- shared fleet bar ---- */
+/*
+ * Deliberately NOT sticky. A sticky bar overlays whatever happens to be
+ * beneath it once the page scrolls, and an overlapped label cannot be measured
+ * for contrast: the accessibility gate reports it as indeterminate, which is
+ * neither a pass nor an actionable failure. The page is short, the bar is
+ * navigation rather than a control surface, and nothing here needs it pinned.
+ */
+.cl-topbar {
+  display: flex;
+  position: static;
+  align-items: center;
+  justify-content: space-between;
+  /* At 320px the focused skip link, the badge and the action do not fit on one
+     row. Wrapping is what keeps them from overlapping; an overlapped badge
+     cannot be measured for contrast and the gate reports it as indeterminate
+     rather than as a pass. */
+  flex-wrap: wrap;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0.7rem clamp(0.9rem, 3vw, 2rem);
+  font-family: var(--mono);
+}
+
+.cl-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  /* Without this the brand text keeps its full intrinsic width at 320px and
+     the actions overlap it. An overlapped label is not merely untidy: a
+     contrast checker cannot resolve what is behind it, so the page stops
+     being measurable as well as readable. */
+  min-width: 0;
+  text-decoration: none;
+}
+
+.cl-badge {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--accent);
+  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.cl-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.cl-title,
+.cl-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-title {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.cl-sub {
+  color: var(--ink-dim);
+  font-size: 0.72rem;
+}
+
+.cl-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cl-btn {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--control-line);
+  border-radius: 10px;
+  background: transparent;
+  padding: 0.5rem 0.85rem;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.cl-btn:hover {
+  border-color: var(--accent);
+}
+
+/* ---- layout ---- */
+main {
+  margin: 0 auto;
+  padding: var(--gap);
+  max-width: 1080px;
+  overflow-wrap: anywhere;
+}
+
+h1 {
+  margin: 0.2rem 0 0.4rem;
+  font-size: clamp(1.5rem, 4vw, 2.2rem);
+  line-height: 1.15;
+}
+
+h2 {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.1rem, 2.6vw, 1.4rem);
+}
+
+h3 {
+  margin: 1rem 0 0.3rem;
+  font-size: 1rem;
+}
+
+p {
+  margin: 0 0 0.7rem;
+}
+
+.lede {
+  color: var(--ink-dim);
+  max-width: 68ch;
+}
+
+.panel {
+  margin: var(--gap) 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: var(--gap);
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.controls {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  margin-bottom: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  /* Grid and flex items default to min-width:auto, which is their CONTENT's
+     minimum width. A <select> whose longest option is a sentence then refuses
+     to shrink and pushes the whole page into horizontal scroll at 320px. */
+  min-width: 0;
+}
+
+label {
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+}
+
+input,
+select {
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 0.5rem 0.6rem;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  min-height: 2.5rem;
+}
+
+input[type="checkbox"] {
+  width: auto;
+  min-height: 1.25rem;
+  accent-color: var(--accent);
+}
+
+button {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panel-2);
+  cursor: pointer;
+  padding: 0.6rem 1rem;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  min-height: 2.75rem;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+button:hover {
+  border-color: var(--focus);
+}
+
+:where(a, button, input, select, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+/* ---- evidence ---- */
+.metrics {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0.6rem 0;
+}
+
+.metric {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  padding: 0.55rem 0.7rem;
+  min-width: 0;
+}
+
+.metric strong {
+  display: block;
+  font-family: var(--mono);
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.metric span {
+  color: var(--ink-dim);
+  font-size: 0.76rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0.6rem 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0.7rem 0;
+  border: 1px solid var(--line);
+  border-left-width: 6px;
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+}
+
+.verdict strong {
+  font-size: 0.95rem;
+}
+
+.verdict p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.verdict.ok {
+  border-left-color: var(--ok);
+  background: var(--ok-ink);
+}
+
+.verdict.bad {
+  border-left-color: var(--bad);
+  background: var(--bad-ink);
+}
+
+.verdict.warn {
+  border-left-color: var(--warn);
+  background: var(--warn-ink);
+}
+
+.mono {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.note {
+  color: var(--ink-dim);
+  font-size: 0.86rem;
+}
+
+.stale {
+  opacity: 1;
+}
+
+details {
+  margin: 0.5rem 0;
+  border: 1px solid var(--control-line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  padding: 0.5rem 0.7rem;
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+details ul {
+  margin: 0.5rem 0 0.2rem;
+  padding-left: 1.1rem;
+}
+
+details li {
+  margin-bottom: 0.3rem;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+a {
+  color: var(--accent);
+}
+
+footer {
+  margin: var(--gap) 0 2rem;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 560px) {
+  /* The badge and the Source link are the whole header on a phone. The
+     wordmark is dropped rather than squeezed: with the skip link in the row at
+     320px there is not enough width for all four, and a crowded header
+     overlaps its own text, which a contrast checker then cannot measure. */
+  /* Hidden from the layout but kept for assistive technology: `display: none`
+     removed the brand link's accessible name along with its pixels, and an
+     aria-label that replaced it then disagreed with the visible wordmark at
+     desktop width, which is its own WCAG 2.5.3 failure. */
+  .cl-brand-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/*
+ * Below this width the transcript stops being a table with a sideways
+ * scroller and becomes a list of labelled rows. A scroller is not merely
+ * inconvenient on a phone: the cells outside its viewport are clipped, and a
+ * clipped cell cannot be measured for contrast, so the page stops being
+ * checkable at exactly the width where it is hardest to read.
+ */
+@media (max-width: 560px) {
+  .table-wrap {
+    overflow-x: visible;
+  }
+
+  table,
+  tbody,
+  tr,
+  td {
+    display: block;
+    width: 100%;
+  }
+
+  thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  tr {
+    border-bottom: 1px solid var(--line);
+    padding: 0.35rem 0;
+  }
+
+  tr:last-child {
+    border-bottom: 0;
+  }
+
+  td {
+    display: grid;
+    grid-template-columns: 8.5rem 1fr;
+    gap: 0.5rem;
+    border-bottom: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  td::before {
+    content: attr(data-label);
+    color: var(--ink-dim);
+    font-size: 0.74rem;
+    text-transform: uppercase;
+  }
+}
+
+@media (max-width: 420px) {
+  .controls {
+    grid-template-columns: 1fr;
+  }
+
+  th,
+  td {
+    padding: 0.4rem 0.45rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
