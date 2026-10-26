@@ -465,6 +465,35 @@ test("honest noise reports exact acceptance and false rejection", async ({
   expect(a + b).toBe(16777216n);
 });
 
+test("repeated fresh-nonce attempts compound, and a reused nonce withholds them", async ({
+  page,
+}) => {
+  await setControls(page, {
+    scenario: "mafia-preask",
+    rounds: "8",
+    tolerated: "1",
+    preAsk: "8",
+    attempts: "4",
+    reuse: false,
+  });
+  await page.locator("#run").click();
+  const shown = (await page.locator("[data-repeated]").textContent()) ?? "";
+  // 1 - (1 - 24057/65536)^4, recomputed here.
+  const pn = 24057n;
+  const pd = 65536n;
+  const qn = pd - pn;
+  const num = pd ** 4n - qn ** 4n;
+  const den = pd ** 4n;
+  expect(shown).toContain(reduce(num, den));
+
+  await setControls(page, { reuse: true });
+  await page.locator("#run").click();
+  await expect(page.locator("[data-repeated]")).toHaveCount(0);
+  await expect(page.locator("[data-repeated-withheld]")).toContainText(
+    "does not apply",
+  );
+});
+
 test("changing any input retires the transcript and the verdict", async ({
   page,
 }) => {

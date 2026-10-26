@@ -11,6 +11,7 @@ import {
   type ScenarioName,
   DEFAULT_CONFIG,
   blindBaseline,
+  attemptsSuccess,
   fraudGain,
   parseExact,
   relayExcess,
@@ -63,6 +64,7 @@ interface Controls {
   fraudDistance: string;
   preAskRounds: number;
   epsilon: string;
+  attempts: number;
   seed: string;
   timingEnforced: boolean;
   predictableChallenges: boolean;
@@ -81,6 +83,7 @@ const INITIAL: Controls = {
   fraudDistance: "11",
   preAskRounds: 8,
   epsilon: "1/8",
+  attempts: 4,
   seed: "s06-default",
   timingEnforced: true,
   predictableChallenges: false,
@@ -107,6 +110,7 @@ function shell(): string {
     ${field("fraudDelay", "Distance-fraud actual delay", INITIAL.fraudDelay)}
     ${field("preAsk", "Rounds pre-asked g", String(INITIAL.preAskRounds), 'type="number" min="0" max="64" step="1"')}
     ${field("epsilon", "Per-bit error rate epsilon", INITIAL.epsilon)}
+    ${field("attempts", "Independent attempts q", String(INITIAL.attempts), 'type="number" min="0" max="1000" step="1"')}
     ${field("seed", "Replay seed", INITIAL.seed, 'type="text"')}
   </div>
   <div class="controls">
@@ -167,6 +171,7 @@ function readControls(): Controls {
     fraudDelay: value("fraudDelay"),
     preAskRounds: Number(value("preAsk")),
     epsilon: value("epsilon"),
+    attempts: Number(value("attempts")),
     seed: value("seed"),
     timingEnforced: checked("timing"),
     predictableChallenges: checked("predictable"),
@@ -200,7 +205,7 @@ function toConfig(controls: Controls): ScenarioConfig {
   };
 }
 
-function render(config: ScenarioConfig): string {
+function render(config: ScenarioConfig, attempts: number): string {
   const result = runScenario(config);
   const { verdict: outcome, analysis } = result;
 
@@ -244,6 +249,16 @@ function render(config: ScenarioConfig): string {
         ["as a decimal", toDecimal(analysis.adversarySuccess, 10)],
         ["Blind-guess baseline", toFraction(blindBaseline(config))],
       ]),
+    );
+  }
+  const repeated = attemptsSuccess(config, analysis.adversarySuccess, attempts);
+  if (repeated) {
+    probability.push(
+      `<p class="note" data-repeated>Over <span class="mono">${escape(attempts)}</span> independent attempts, each with a FRESH verifier nonce, the same adversary succeeds at least once with exact probability <span class="mono">${escape(toFraction(repeated))}</span>.</p>`,
+    );
+  } else if (analysis.adversarySuccess && config.reuseNonce) {
+    probability.push(
+      `<p class="note" data-repeated-withheld>No figure is given for repeated attempts: the verifier reused its nonce, so the attempts are not independent and <span class="mono">1-(1-p)^q</span> does not apply.</p>`,
     );
   }
   if (analysis.ensembleAverage) {
@@ -341,7 +356,7 @@ export function mount(root: HTMLElement): void {
   const run = (): void => {
     try {
       const controls = readControls();
-      output.innerHTML = render(toConfig(controls));
+      output.innerHTML = render(toConfig(controls), controls.attempts);
       lastSignature = JSON.stringify(controls);
       staleNote.textContent = "";
     } catch (error) {

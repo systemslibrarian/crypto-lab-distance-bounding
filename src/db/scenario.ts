@@ -53,6 +53,7 @@ import {
   honestAcceptance,
   mafiaSuccess,
   partialPreAskSuccess,
+  repeatedAttempts,
 } from "./probability";
 import { fromHex, utf8 } from "./sha256";
 
@@ -430,6 +431,23 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
     authenticatedRelay,
     notes,
   };
+}
+
+/**
+ * The chance an adversary succeeds in at least one of `q` attempts.
+ *
+ * Returns null when the verifier reused its nonce: the attempts are then NOT
+ * independent -- the same response table answers all of them -- so 1-(1-p)^q
+ * does not apply and no number is printed in its place. `repeatedAttempts`
+ * refuses that case outright; this is where the lesson decides not to ask.
+ */
+export function attemptsSuccess(
+  config: ScenarioConfig,
+  perAttempt: Exact | null,
+  attempts: number,
+): Exact | null {
+  if (perAttempt === null || config.reuseNonce) return null;
+  return repeatedAttempts(perAttempt, attempts, true);
 }
 
 /** The blind-guess baseline for the current parameters, for comparison. */

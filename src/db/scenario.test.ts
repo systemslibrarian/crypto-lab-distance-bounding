@@ -3,6 +3,7 @@ import { cmp, eq, exact, toFraction } from "./exact";
 import {
   DEFAULT_CONFIG,
   REUSED_NONCE_HEX,
+  attemptsSuccess,
   type ScenarioConfig,
   type ScenarioName,
   blindBaseline,
@@ -203,6 +204,25 @@ describe("the broken controls", () => {
     expect(result.verdict.accepted).toBe(true);
     expect(toFraction(result.records[0].trip.total)).toBe("22");
     expect(toFraction(result.verdict.rounds[0].distanceBound!)).toBe("10");
+  });
+});
+
+describe("repeated attempts", () => {
+  it("compounds independent fresh-nonce attempts and withholds the rest", () => {
+    const fresh = run({ scenario: "mafia-preask" });
+    const p = fresh.analysis.adversarySuccess!;
+    expect(eq(attemptsSuccess(fresh.config, p, 1)!, p)).toBe(true);
+    expect(eq(attemptsSuccess(fresh.config, p, 0)!, exact(0n))).toBe(true);
+    // Strictly increasing in q, and never reaching certainty for p < 1.
+    expect(cmp(attemptsSuccess(fresh.config, p, 4)!, p)).toBe(1);
+    expect(cmp(attemptsSuccess(fresh.config, p, 4)!, exact(1n))).toBe(-1);
+    // No adversary, no figure.
+    expect(attemptsSuccess(fresh.config, null, 4)).toBeNull();
+    // A reused nonce makes the attempts dependent, so nothing is printed.
+    const reused = run({ scenario: "mafia-preask", reuseNonce: true });
+    expect(
+      attemptsSuccess(reused.config, reused.analysis.adversarySuccess, 4),
+    ).toBeNull();
   });
 });
 
