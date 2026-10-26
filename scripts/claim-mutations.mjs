@@ -191,9 +191,8 @@ const MUTATIONS = [
       "Changing an input must retire the displayed transcript and verdict rather than leaving stale evidence on screen.",
     file: "src/ui/app.ts",
     anchor:
-      '    output.innerHTML = verdict(\n      "warn",\n      "Retired: inputs changed",',
-    replacement:
-      '    if (lastSignature === "") return;\n    output.innerHTML = verdict(\n      "warn",\n      "Retired: inputs changed",',
+      '    output.innerHTML = verdict(\n      "warn",\n      "Retired: inputs changed",\n      "The transcript and verdict below were computed from different inputs. Run the session again.",\n      "stale",\n    );',
+    replacement: "    void verdict;",
     target: browser(
       "changing any input retires the transcript and the verdict",
     ),

@@ -110,10 +110,15 @@ describe("the six required actor views", () => {
     // real ones it would answer every round correctly while the page still
     // quoted a 3/4-per-round figure, which would be a false claim about an
     // attacker that had in effect read the response registers.
+    // preAskRounds must equal rounds. With g < n some rounds are blind
+    // whatever the guesses were, so content errors would survive even if the
+    // attacker HAD been handed the real challenges -- and the check would pass
+    // while proving nothing.
     const result = run({
       scenario: "mafia-preask",
       rounds: 16,
       toleratedErrors: 16,
+      preAskRounds: 16,
     });
     expect(result.verdict.lateRounds).toBe(0);
     expect(result.verdict.contentErrors).toBeGreaterThan(0);
