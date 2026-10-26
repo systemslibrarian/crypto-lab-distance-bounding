@@ -1,0 +1,183 @@
+name: Verify and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  # Superseded PRs may cancel each other. Main and dispatch runs carry the
+  # verified Pages artifact, so cancelling one could leave a green commit
+  # undeployed.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Static, unit, browser, and accessibility gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Type-check application and browser tests
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and coverage gate
+        run: npm run test:coverage
+
+      - name: Build production lesson
+        run: npm run build
+
+      - name: Audit high-severity dependency findings
+        run: npm audit --audit-level=high
+
+      - name: Upload coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Install Chromium
+        run: npx playwright install chromium
+
+      - name: Learner-visible claim gate
+        run: npm run test:claims
+
+      - name: Accessibility and reflow gate
+        run: npm run test:a11y
+
+      - name: Upload exact verified Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  claim-integrity:
+    name: Clean-baseline claim-mutation gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install chromium
+
+      - name: Clean-baseline source-mutation gate
+        run: npm run test:mutations
+
+      - name: Upload mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: claim-mutations
+          path: test-results/claim-mutations/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  configure-pages:
+    if: github.event_name != 'pull_request'
+    needs: [build, claim-integrity]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      # This privileged job checks out no code, installs no dependency, and
+      # executes no repository-controlled script.
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: configure-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy exact verified artifact
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  # Dependabot only. These are the same complete application and claim-integrity
+  # gates required by deploy, so an update cannot merge after a weaker check.
+  dependabot-auto-merge:
+    needs: [build, claim-integrity]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      # Required by the workflow dispatch after a successful merge.
+      actions: write
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v3
+
+      - name: Merge any bump whose gate went green
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        # A sibling update can move main between the gate and merge. Retry that
+        # benign race, then fail and leave the pull request open if it still
+        # cannot land.
+        run: |
+          merged=""
+          for attempt in 1 2 3; do
+            if gh pr merge --squash --delete-branch "$PR_URL"; then
+              merged=1
+              break
+            fi
+            echo "merge attempt $attempt failed; base branch may have moved - retrying"
+            sleep 15
+          done
+          if [ -z "$merged" ]; then
+            echo "::error::gate passed but the merge did not land after 3 attempts"
+            exit 1
+          fi
+          # A merge made with GITHUB_TOKEN raises no push event -- GitHub suppresses
+          # them so workflows cannot retrigger themselves -- so deploy would never run
+          # and the site would keep serving the previous build. Ask for it explicitly;
+          # a workflow_dispatch through the API is not suppressed. The dispatched run
+          # is the same gate-then-deploy pipeline, so a bad merge still ships nothing.
+          gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
