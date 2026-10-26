@@ -110,8 +110,9 @@ export function partialPreAskSuccess(n: number, g: number, x: number): Exact {
 /**
  * Distance fraud against a REALIZED response table.
  *
- * A dishonest distant key holder answers before the challenge arrives. In a
- * round where R0ᵢ = R1ᵢ it is right whatever Cᵢ turns out to be; only the
+ * A dishonest distant key holder commits to a response before seeing the
+ * challenge, then starts the return transmission when it arrives. In a round
+ * where R0ᵢ = R1ᵢ it is right whatever Cᵢ turns out to be; only the
  * h = HammingDistance(R0, R1) positions where they differ are a coin flip.
  *
  *     P = 2^(-h) · Σ_{e=0..min(x,h)} C(h,e)

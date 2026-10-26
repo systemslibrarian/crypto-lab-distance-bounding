@@ -30,7 +30,6 @@ import {
   DishonestProver,
   MafiaPreAskAttacker,
   applyNoise,
-  corruptionThreshold,
   mafiaRoundTrip,
   ordinaryAuthenticatedRelay,
   proverOracle,
@@ -55,7 +54,7 @@ import {
   partialPreAskSuccess,
   repeatedAttempts,
 } from "./probability";
-import { fromHex, utf8 } from "./sha256";
+import { concatBytes, fromHex, hmacSha256, utf8 } from "./sha256";
 
 export type ScenarioName =
   | "honest"
@@ -109,13 +108,16 @@ export interface ScenarioResult {
   readonly nonceHex: string;
   readonly challenges: readonly Bit[];
   readonly records: readonly RoundRecord[];
-  readonly verdict: SessionVerdict;
+  /** Null for the ordinary untimed authentication comparison. */
+  readonly verdict: SessionVerdict | null;
   readonly threshold: Exact;
   readonly analysis: ScenarioAnalysis;
   /** Present only for the authenticated-relay contrast. */
   readonly authenticatedRelay: ReturnType<
     typeof ordinaryAuthenticatedRelay
   > | null;
+  /** Present only for authentication: true when one changed tag is refused. */
+  readonly authenticationTamperRejected: boolean | null;
   readonly notes: readonly string[];
 }
 
@@ -140,7 +142,7 @@ export const DEFAULT_CONFIG: ScenarioConfig = {
   mafia: { distance: exact(2n), processingDelay: exact(3n) },
   fraudDistance: exact(14n),
   fraudDelay: exact(0n),
-  noise: { epsilon: exact(1n, 8n), precision: 16 },
+  noise: { epsilon: exact(1n, 8n) },
   preAskRounds: 8,
   timingEnforced: true,
   predictableChallenges: false,
@@ -158,6 +160,19 @@ function challengeBits(
   return Array.from({ length: rounds }, (_, i) => (i % 2) as Bit);
 }
 
+const AUTH_DOMAIN = utf8("crypto-lab-distance-bounding/auth-v1\0");
+
+function authenticationTag(key: Uint8Array, challenge: Uint8Array): Uint8Array {
+  return hmacSha256(key, concatBytes(AUTH_DOMAIN, challenge));
+}
+
+function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let i = 0; i < a.length; i += 1) difference |= a[i] ^ b[i];
+  return difference === 0;
+}
+
 /**
  * Run one scenario end to end.
  *
@@ -173,11 +188,10 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
     : source.nextBytes(16);
   const registers: Registers = deriveRegisters(key, nonce, config.rounds);
   const oracle: ProverOracle = proverOracle(registers);
-  const challenges = challengeBits(
-    source,
-    config.rounds,
-    config.predictableChallenges,
-  );
+  const challenges =
+    config.scenario === "authenticated-relay"
+      ? []
+      : challengeBits(source, config.rounds, config.predictableChallenges);
   const limit = threshold(config.profile);
   const v = config.profile.v;
   const parameters: SessionParameters = {
@@ -190,16 +204,25 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
   const records: RoundRecord[] = [];
   const notes: string[] = [];
   let authenticatedRelay: ScenarioResult["authenticatedRelay"] = null;
+  let authenticationTamperRejected: boolean | null = null;
   let analysisSuccess: Exact | null = null;
   let analysisLabel = "not applicable to this actor";
   let ensemble: Exact | null = null;
   const caveats: string[] = [];
 
-  if (config.predictableChallenges) {
+  if (config.predictableChallenges && config.scenario === "mafia-preask") {
+    const blindRounds = config.rounds - config.preAskRounds;
     caveats.push(
-      "Challenges follow a fixed pattern, so the 3/4-per-round figure does not " +
-        "apply: a pre-asking attacker guesses every challenge correctly and " +
-        "succeeds with certainty.",
+      "Challenges follow a fixed pattern, so the 3/4 figure does not apply. " +
+        `The ${config.preAskRounds} pre-asked round(s) are certain; the remaining ` +
+        `${blindRounds} round(s) are still blind guesses.`,
+    );
+  }
+  if (config.predictableChallenges && config.scenario === "distance-fraud") {
+    caveats.push(
+      "The challenge pattern is known before the rapid phase, so this key " +
+        "holder can preselect every correct response. The unknown-challenge " +
+        "distance-fraud formula does not apply.",
     );
   }
   if (config.reuseNonce) {
@@ -240,14 +263,9 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
     }
 
     case "honest-noisy": {
-      const limitValue = corruptionThreshold(config.noise);
       for (let round = 1; round <= config.rounds; round += 1) {
         const c = challenges[round - 1];
         const correct = response(registers, round, c);
-        let drawn = 0n;
-        for (let i = 0; i < config.noise.precision; i += 1) {
-          drawn = (drawn << 1n) | BigInt(source.nextBit());
-        }
         const trip = symmetricRoundTrip(
           config.honest.distance,
           v,
@@ -255,7 +273,7 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
         );
         records.push(
           recordRound(round, c, correct, {
-            bit: applyNoise(correct, drawn, limitValue),
+            bit: applyNoise(correct, source, config.noise.epsilon),
             trip,
           }),
         );
@@ -268,27 +286,29 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
     }
 
     case "authenticated-relay": {
+      const authChallenge = source.nextBytes(16);
+      const verifyTag = (challenge: Uint8Array, tag: Uint8Array) =>
+        equalBytes(authenticationTag(key, challenge), tag);
       authenticatedRelay = ordinaryAuthenticatedRelay(
-        oracle,
-        config.rounds,
-        challenges,
+        (challenge) => authenticationTag(key, challenge),
+        authChallenge,
+        verifyTag,
       );
-      // Modeled as an untimed exchange: the records exist so the transcript
-      // renders, but the contrast is that nothing here is timed at all.
-      for (let round = 1; round <= config.rounds; round += 1) {
-        const c = challenges[round - 1];
-        const trip = relayRoundTrip(config.relay, v);
-        records.push(
-          recordRound(round, c, response(registers, round, c), {
-            bit: oracle(round, c),
-            trip,
-          }),
-        );
-      }
+      const altered = ordinaryAuthenticatedRelay(
+        (challenge) => {
+          const tag = authenticationTag(key, challenge);
+          tag[0] ^= 1;
+          return tag;
+        },
+        authChallenge,
+        verifyTag,
+      );
+      authenticationTamperRejected = !altered.authenticated;
       notes.push(
-        "Every answer is the genuine prover's, so the exchange authenticates " +
-          "perfectly. Authentication is not proximity: without a timing check " +
-          "the relay is invisible.",
+        "The relay forwards a 128-bit challenge and a genuine HMAC-SHA-256 " +
+          "response without learning the shared key. The verifier accepts the " +
+          "tag, but no rapid phase or timing measurement exists, so the exchange " +
+          "establishes authentication and no proximity bound.",
       );
       break;
     }
@@ -340,7 +360,10 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
         );
       }
       analysisSuccess = config.predictableChallenges
-        ? exact(1n)
+        ? blindSuccess(
+            config.rounds - config.preAskRounds,
+            config.toleratedErrors,
+          )
         : config.preAskRounds >= config.rounds
           ? mafiaSuccess(config.rounds, config.toleratedErrors)
           : partialPreAskSuccess(
@@ -349,7 +372,7 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
               config.toleratedErrors,
             );
       analysisLabel = config.predictableChallenges
-        ? "certain: predictable challenges make every pre-ask hit"
+        ? `${config.preAskRounds} predictable pre-asks; ${config.rounds - config.preAskRounds} blind round(s)`
         : config.preAskRounds >= config.rounds
           ? "mafia pre-ask over every round"
           : `partial pre-ask, g = ${config.preAskRounds} of ${config.rounds}`;
@@ -362,9 +385,18 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
     }
 
     case "distance-fraud": {
-      const choices = new BitSource(
-        utf8(`${config.seed}/fraud-choice`),
-      ).nextBits(Math.max(1, config.rounds));
+      const choices = config.predictableChallenges
+        ? Array.from({ length: config.rounds }, (_, index) => index + 1)
+            .filter(
+              (round) => registers.r0[round - 1] !== registers.r1[round - 1],
+            )
+            .map((round) => response(registers, round, challenges[round - 1]))
+        : new BitSource(utf8(`${config.seed}/fraud-choice`)).nextBits(
+            Math.max(1, config.rounds),
+          );
+      // If h = 0, no early choice is consumed; keep the constructor's direct-
+      // caller guard while allowing this degenerate response table.
+      if (choices.length === 0) choices.push(0);
       const prover = new DishonestProver(registers, choices);
       for (let round = 1; round <= config.rounds; round += 1) {
         const c = challenges[round - 1];
@@ -379,20 +411,30 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
         );
       }
       const h = registerDistance(registers);
-      analysisSuccess = distanceFraudSuccess(h, config.toleratedErrors);
-      ensemble = distanceFraudEnsemble(config.rounds, config.toleratedErrors);
-      analysisLabel = `realized register distance h = ${h}`;
+      analysisSuccess = config.predictableChallenges
+        ? exact(1n)
+        : distanceFraudSuccess(h, config.toleratedErrors);
+      ensemble = config.predictableChallenges
+        ? null
+        : distanceFraudEnsemble(config.rounds, config.toleratedErrors);
+      analysisLabel = config.predictableChallenges
+        ? "certain under the known challenge pattern"
+        : `realized register distance h = ${h}`;
       notes.push(
         "This is the legitimate key holder behaving dishonestly at a distance. " +
           "There is no relay and no third party, so it is NOT mafia fraud. It " +
-          "answers before the challenge arrives, so the verifier subtracts a " +
-          "processing delay that never happened.",
+          "commits to a response before seeing the challenge, then transmits " +
+          "after challenge arrival; the model retains both propagation legs and " +
+          "removes only the processing delay the verifier assumed.",
       );
       break;
     }
   }
 
-  const verdict = verifySession(records, parameters);
+  const verdict =
+    config.scenario === "authenticated-relay"
+      ? null
+      : verifySession(records, parameters);
 
   const analysis: ScenarioAnalysis = {
     registerDistance: registerDistance(registers),
@@ -429,6 +471,7 @@ export function runScenario(config: ScenarioConfig): ScenarioResult {
     threshold: limit,
     analysis,
     authenticatedRelay,
+    authenticationTamperRejected,
     notes,
   };
 }

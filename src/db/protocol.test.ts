@@ -20,16 +20,16 @@ import {
   DishonestProver,
   MafiaPreAskAttacker,
   applyNoise,
-  corruptionThreshold,
   mafiaRoundTrip,
   ordinaryAuthenticatedRelay,
   proverOracle,
   relayAnswer,
   relayPathLength,
   relayRoundTrip,
+  sampleBernoulli,
 } from "./attacks";
 import { type TimingProfile, symmetricRoundTrip, threshold } from "./timing";
-import { fromHex, utf8 } from "./sha256";
+import { concatBytes, fromHex, hmacSha256, utf8 } from "./sha256";
 
 const profile: TimingProfile = {
   v: exact(1n),
@@ -201,16 +201,28 @@ describe("the online relay", () => {
   });
 
   it("an ordinary authenticated exchange relays perfectly and proves no distance", () => {
-    const registers = deriveRegisters(KEY, NONCE_A, 8);
-    const result = ordinaryAuthenticatedRelay(
-      proverOracle(registers),
-      8,
-      new BitSource(utf8("auth")).nextBits(8),
-    );
+    const challenge = utf8("fresh verifier challenge");
+    const domain = utf8("ordinary-auth-control\0");
+    const tag = (message: Uint8Array) =>
+      hmacSha256(KEY, concatBytes(domain, message));
+    const verify = (message: Uint8Array, received: Uint8Array) =>
+      Buffer.from(tag(message)).equals(Buffer.from(received));
+    const result = ordinaryAuthenticatedRelay(tag, challenge, verify);
     expect(result.authenticated).toBe(true);
     expect(result.provedProximity).toBe(false);
     expect(result.provedDistance).toBeNull();
     expect(result.note).toMatch(/establishes no upper bound on distance/);
+
+    const altered = ordinaryAuthenticatedRelay(
+      () => {
+        const wrong = tag(challenge);
+        wrong[0] ^= 1;
+        return wrong;
+      },
+      challenge,
+      verify,
+    );
+    expect(altered.authenticated).toBe(false);
   });
 });
 
@@ -505,27 +517,41 @@ describe("distance fraud", () => {
 });
 
 describe("noise", () => {
-  it("corrupts a bit exactly when the drawn value falls below the threshold", () => {
-    const model = { epsilon: exact(1n, 4n), precision: 8 };
-    const limit = corruptionThreshold(model);
-    expect(limit).toBe(64n);
-    expect(applyNoise(0, 63n, limit)).toBe(1);
-    expect(applyNoise(0, 64n, limit)).toBe(0);
-    expect(applyNoise(1, 0n, limit)).toBe(0);
-    expect(applyNoise(1, 255n, limit)).toBe(1);
+  const source = (bits: readonly Bit[]) => {
+    let index = 0;
+    return {
+      nextBit: () => {
+        const bit = bits[index];
+        if (bit === undefined) throw new Error("test bit source exhausted");
+        index += 1;
+        return bit;
+      },
+      consumed: () => index,
+    };
+  };
+
+  it("samples a non-dyadic rational exactly by rejecting out-of-range draws", () => {
+    // For epsilon = 1/3, two bits encode 0..3. Draw 3 is rejected; draw 0 is
+    // one of the one-in-three accepting outcomes.
+    const accepted = source([1, 1, 0, 0]);
+    expect(sampleBernoulli(accepted, exact(1n, 3n))).toBe(true);
+    expect(accepted.consumed()).toBe(4);
+
+    const refused = source([0, 1]);
+    expect(sampleBernoulli(refused, exact(1n, 3n))).toBe(false);
+    expect(applyNoise(0, source([0, 0]), exact(1n, 3n))).toBe(1);
+    expect(applyNoise(1, source([0, 1]), exact(1n, 3n))).toBe(1);
   });
 
   it("is a declared independent model, with its bounds enforced", () => {
-    expect(corruptionThreshold({ epsilon: exact(0n), precision: 8 })).toBe(0n);
-    expect(corruptionThreshold({ epsilon: exact(1n), precision: 8 })).toBe(
-      256n,
+    expect(sampleBernoulli(source([]), exact(0n))).toBe(false);
+    expect(sampleBernoulli(source([]), exact(1n))).toBe(true);
+    expect(() => sampleBernoulli(source([]), exact(3n, 2n))).toThrow(
+      /\[0, 1\]/,
     );
     expect(() =>
-      corruptionThreshold({ epsilon: exact(3n, 2n), precision: 8 }),
-    ).toThrow(/\[0, 1\]/);
-    expect(() =>
-      corruptionThreshold({ epsilon: exact(1n, 2n), precision: 0 }),
-    ).toThrow(/1\.\.32/);
+      sampleBernoulli(source([]), exact(1n, 0x1_0000_0001n)),
+    ).toThrow(/2\^32/);
   });
 });
 
@@ -570,12 +596,25 @@ describe("the attacker knowledge boundary is structural", () => {
     expect(() => new MafiaPreAskAttacker(4, oracle, [0, 1], [0], 4)).toThrow(
       /not enough guessed challenges/,
     );
+    expect(
+      () => new MafiaPreAskAttacker(4, oracle, [0, 1, 0, 1], [], 4),
+    ).toThrow(/fallback bit/);
+    expect(() => new MafiaPreAskAttacker(0, oracle, [], [0], 0)).toThrow(
+      /positive integer/,
+    );
     const attacker = new MafiaPreAskAttacker(4, oracle, [0, 1, 0, 1], [0]);
     const trip = mafiaRoundTrip(
       { distance: exact(1n), processingDelay: exact(1n) },
       profile.v,
     );
     expect(() => attacker.answer(9, 0, trip)).toThrow(/outside the session/);
+  });
+
+  it("refuses a distance-fraud actor with no early-response choices", () => {
+    const registers = deriveRegisters(KEY, NONCE_A, 4);
+    expect(() => new DishonestProver(registers, [])).toThrow(
+      /early-response choice/,
+    );
   });
 });
 

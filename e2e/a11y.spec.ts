@@ -24,22 +24,20 @@ test.afterEach(async ({ page }) => {
 });
 
 /**
- * Both colour schemes are scanned, because both are real: this lesson pins no
- * theme and persists nothing, so the operating-system preference is the only
- * input and a palette that fails contrast in one scheme would ship unnoticed
- * if only the other were scanned.
+ * The one pinned dark palette is scanned under both operating-system
+ * preferences so an accidental prefers-color-scheme branch cannot escape.
  */
 const comprehensiveCases = [
-  { osScheme: "dark", viewport: undefined, label: "dark OS preference" },
+  { osScheme: "dark", viewport: undefined, label: "pinned dark, dark OS" },
   {
     osScheme: "light",
     viewport: NARROW,
-    label: "light OS preference at 380px",
+    label: "pinned dark, light OS at 380px",
   },
   {
     osScheme: "dark",
     viewport: { width: 320, height: 900 },
-    label: "dark OS preference at 320px",
+    label: "pinned dark at 320px",
   },
 ] as const;
 

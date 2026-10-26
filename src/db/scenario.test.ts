@@ -16,6 +16,7 @@ import {
   distanceFraudSuccess,
   mafiaSuccess,
 } from "./probability";
+import { concatBytes, fromHex, hmacSha256, utf8 } from "./sha256";
 
 const run = (overrides: Partial<ScenarioConfig> = {}) =>
   runScenario({ ...DEFAULT_CONFIG, ...overrides });
@@ -33,11 +34,17 @@ describe("every scenario is complete and replayable", () => {
   it("produces a full transcript for each actor", () => {
     for (const scenario of ALL) {
       const result = run({ scenario });
-      expect(result.records, scenario).toHaveLength(DEFAULT_CONFIG.rounds);
-      expect(result.verdict.rounds, scenario).toHaveLength(
-        DEFAULT_CONFIG.rounds,
-      );
-      expect(result.challenges, scenario).toHaveLength(DEFAULT_CONFIG.rounds);
+      if (scenario === "authenticated-relay") {
+        expect(result.records).toHaveLength(0);
+        expect(result.challenges).toHaveLength(0);
+        expect(result.verdict).toBeNull();
+      } else {
+        expect(result.records, scenario).toHaveLength(DEFAULT_CONFIG.rounds);
+        expect(result.verdict!.rounds, scenario).toHaveLength(
+          DEFAULT_CONFIG.rounds,
+        );
+        expect(result.challenges, scenario).toHaveLength(DEFAULT_CONFIG.rounds);
+      }
       expect(result.notes.length, scenario).toBeGreaterThan(0);
       expect(toFraction(result.threshold), scenario).toBe("22");
       expect(result.analysis.registerDistance).toBeGreaterThanOrEqual(0);
@@ -56,7 +63,7 @@ describe("every scenario is complete and replayable", () => {
       expect(a.records.map((r) => r.received)).toEqual(
         b.records.map((r) => r.received),
       );
-      expect(a.verdict.accepted).toBe(b.verdict.accepted);
+      expect(a.verdict?.accepted).toBe(b.verdict?.accepted);
 
       const other = run({ scenario, seed: "a-different-seed" });
       expect(other.nonceHex).not.toBe(a.nonceHex);
@@ -67,9 +74,9 @@ describe("every scenario is complete and replayable", () => {
 describe("the six required actor views", () => {
   it("accepts the honest prover inside the range", () => {
     const result = run({ scenario: "honest" });
-    expect(result.verdict.accepted).toBe(true);
-    expect(result.verdict.contentErrors).toBe(0);
-    expect(result.verdict.lateRounds).toBe(0);
+    expect(result.verdict!.accepted).toBe(true);
+    expect(result.verdict!.contentErrors).toBe(0);
+    expect(result.verdict!.lateRounds).toBe(0);
     // Distance 4, delay 3, so T = 11, comfortably inside Theta = 22.
     expect(toFraction(result.records[0].trip.total)).toBe("11");
   });
@@ -79,22 +86,34 @@ describe("the six required actor views", () => {
     expect(result.authenticatedRelay).not.toBeNull();
     expect(result.authenticatedRelay?.authenticated).toBe(true);
     expect(result.authenticatedRelay?.provedProximity).toBe(false);
-    expect(result.records.every((r) => r.received === r.expected)).toBe(true);
+    expect(result.authenticatedRelay?.challenge).toHaveLength(16);
+    expect(result.authenticatedRelay?.relayedTag).toHaveLength(32);
+    const expected = hmacSha256(
+      fromHex(DEFAULT_CONFIG.keyHex),
+      concatBytes(
+        utf8("crypto-lab-distance-bounding/auth-v1\0"),
+        result.authenticatedRelay!.challenge,
+      ),
+    );
+    expect(result.authenticatedRelay?.relayedTag).toEqual(expected);
+    expect(result.authenticationTamperRejected).toBe(true);
+    expect(result.records).toHaveLength(0);
+    expect(result.verdict).toBeNull();
   });
 
   it("charges the whole relay path to the online relay and refuses it", () => {
     const result = run({ scenario: "online-relay" });
     expect(result.records.every((r) => r.received === r.expected)).toBe(true);
-    expect(result.verdict.contentErrors).toBe(0);
-    expect(result.verdict.accepted).toBe(false);
-    expect(result.verdict.lateRounds).toBe(DEFAULT_CONFIG.rounds);
+    expect(result.verdict!.contentErrors).toBe(0);
+    expect(result.verdict!.accepted).toBe(false);
+    expect(result.verdict!.lateRounds).toBe(DEFAULT_CONFIG.rounds);
     // 2*(1+30+1)/1 + 3 + 1 = 68, which overshoots Theta = 22 by 46.
     expect(toFraction(relayExcess(DEFAULT_CONFIG))).toBe("46");
   });
 
   it("lets the mafia attacker pass timing and quotes its exact chance", () => {
     const result = run({ scenario: "mafia-preask" });
-    expect(result.verdict.lateRounds).toBe(0);
+    expect(result.verdict!.lateRounds).toBe(0);
     expect(result.analysis.adversarySuccess).not.toBeNull();
     expect(eq(result.analysis.adversarySuccess!, mafiaSuccess(8, 1))).toBe(
       true,
@@ -120,8 +139,8 @@ describe("the six required actor views", () => {
       toleratedErrors: 16,
       preAskRounds: 16,
     });
-    expect(result.verdict.lateRounds).toBe(0);
-    expect(result.verdict.contentErrors).toBeGreaterThan(0);
+    expect(result.verdict!.lateRounds).toBe(0);
+    expect(result.verdict!.contentErrors).toBeGreaterThan(0);
     expect(result.config.predictableChallenges).toBe(false);
   });
 
@@ -180,17 +199,48 @@ describe("the broken controls", () => {
       scenario: "mafia-preask",
       predictableChallenges: true,
     });
-    expect(result.verdict.contentErrors).toBe(0);
-    expect(result.verdict.accepted).toBe(true);
+    expect(result.verdict!.contentErrors).toBe(0);
+    expect(result.verdict!.accepted).toBe(true);
     expect(eq(result.analysis.adversarySuccess!, exact(1n))).toBe(true);
     expect(result.analysis.formulaCaveats.join(" ")).toMatch(
-      /does not apply|succeeds with certainty/,
+      /does not apply|pre-asked round\(s\) are certain/,
+    );
+  });
+
+  it("keeps unasked predictable-challenge rounds blind", () => {
+    const result = run({
+      scenario: "mafia-preask",
+      rounds: 8,
+      toleratedErrors: 1,
+      preAskRounds: 4,
+      predictableChallenges: true,
+    });
+    expect(eq(result.analysis.adversarySuccess!, blindSuccess(4, 1))).toBe(
+      true,
+    );
+    expect(cmp(result.analysis.adversarySuccess!, exact(1n))).toBe(-1);
+    expect(result.analysis.adversarySuccessLabel).toMatch(
+      /4 predictable pre-asks; 4 blind/,
+    );
+  });
+
+  it("lets a key holder exploit a fully predictable distance-fraud challenge pattern", () => {
+    const result = run({
+      scenario: "distance-fraud",
+      predictableChallenges: true,
+      toleratedErrors: 0,
+    });
+    expect(result.verdict!.contentErrors).toBe(0);
+    expect(eq(result.analysis.adversarySuccess!, exact(1n))).toBe(true);
+    expect(result.analysis.ensembleAverage).toBeNull();
+    expect(result.analysis.formulaCaveats.join(" ")).toMatch(
+      /preselect every correct response/,
     );
   });
 
   it("says plainly that disabling timing stops it being distance bounding", () => {
     const result = run({ scenario: "online-relay", timingEnforced: false });
-    expect(result.verdict.accepted).toBe(true);
+    expect(result.verdict!.accepted).toBe(true);
     expect(result.analysis.formulaCaveats.join(" ")).toMatch(
       /no longer distance bounding/,
     );
@@ -205,10 +255,10 @@ describe("the broken controls", () => {
       fraudDelay: exact(0n),
       toleratedErrors: 8,
     });
-    expect(result.verdict.lateRounds).toBe(0);
-    expect(result.verdict.accepted).toBe(true);
+    expect(result.verdict!.lateRounds).toBe(0);
+    expect(result.verdict!.accepted).toBe(true);
     expect(toFraction(result.records[0].trip.total)).toBe("22");
-    expect(toFraction(result.verdict.rounds[0].distanceBound!)).toBe("10");
+    expect(toFraction(result.verdict!.rounds[0].distanceBound!)).toBe("10");
   });
 });
 

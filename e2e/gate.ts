@@ -153,9 +153,9 @@ export async function boot(
     `${osScheme} OS color preference must be active`,
   ).toBe(true);
 
-  // BOTH schemes are supported and NEITHER is pinned or persisted. There is no
-  // toggle to click and nothing is written to storage: the operating system is
-  // the only input, which is why this gate scans each scheme separately.
+  // The fleet contract pins exactly one dark theme. OS preference may differ,
+  // but it must not change the page, and no learner-facing toggle survives.
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(
     page.locator(
       "#theme-toggle, #themeToggle, .theme-toggle, .theme-toggle-btn, [data-theme-toggle], #cl-theme-toggle",

@@ -139,10 +139,9 @@ const MUTATIONS = [
     finding:
       "Distance fraud is conditioned on the REALIZED Hamming distance between R0 and R1, not on n.",
     file: "src/db/scenario.ts",
-    anchor:
-      "      analysisSuccess = distanceFraudSuccess(h, config.toleratedErrors);",
+    anchor: "        : distanceFraudSuccess(h, config.toleratedErrors);",
     replacement:
-      "      analysisSuccess = distanceFraudSuccess(config.rounds, config.toleratedErrors);",
+      "        : distanceFraudSuccess(config.rounds, config.toleratedErrors);",
     target: browser(
       "distance fraud is conditioned on the realized register distance",
     ),
@@ -162,14 +161,14 @@ const MUTATIONS = [
   {
     id: "S06-M08",
     finding:
-      "Predictable challenges make a pre-ask certain; quoting the ideal 3/4-per-round bound there would understate the attacker.",
+      "Predictability helps only rounds the attacker pre-asked; the remaining n-g rounds are still blind.",
     file: "src/db/scenario.ts",
     anchor:
-      "      analysisSuccess = config.predictableChallenges\n        ? exact(1n)",
+      "      analysisSuccess = config.predictableChallenges\n        ? blindSuccess(\n            config.rounds - config.preAskRounds,\n            config.toleratedErrors,\n          )",
     replacement:
-      "      analysisSuccess = config.predictableChallenges\n        ? mafiaSuccess(config.rounds, config.toleratedErrors)",
+      "      analysisSuccess = config.predictableChallenges\n        ? exact(1n)",
     target: browser(
-      "predictable challenges withdraw the 3/4 figure and succeed with certainty",
+      "predictable challenges leave rounds outside a partial pre-ask blind",
     ),
   },
   {
@@ -206,6 +205,57 @@ const MUTATIONS = [
     replacement:
       '  ["Rounds n", `${config.rounds}:${new Date().getMilliseconds()}`],',
     target: browser("a browser clock cannot change the modeled verdict"),
+  },
+  {
+    id: "S06-M12",
+    finding:
+      "The ordinary-authentication verifier must compare the received HMAC tag with an independently recomputed tag.",
+    file: "src/db/scenario.ts",
+    anchor:
+      "      const verifyTag = (challenge: Uint8Array, tag: Uint8Array) =>\n        equalBytes(authenticationTag(key, challenge), tag);",
+    replacement:
+      "      const verifyTag = (_challenge: Uint8Array, _tag: Uint8Array) => true;",
+    target: browser(
+      "an ordinary authenticated exchange relays and proves no proximity",
+    ),
+  },
+  {
+    id: "S06-M13",
+    finding:
+      "Non-power-of-two noise denominators require rejection sampling rather than a biased modulo or threshold shortcut.",
+    file: "src/db/attacks.ts",
+    anchor: "    if (drawn < epsilon.d) return drawn < epsilon.n;",
+    replacement: "    return drawn < epsilon.n;",
+    target: unit(
+      "src/db/protocol.test.ts",
+      "samples a non-dyadic rational exactly by rejecting out-of-range draws",
+    ),
+  },
+  {
+    id: "S06-M14",
+    finding:
+      "A distance-fraud key holder that knows every challenge can preselect every correct response, so success is certain.",
+    file: "src/db/scenario.ts",
+    anchor:
+      "      analysisSuccess = config.predictableChallenges\n        ? exact(1n)\n        : distanceFraudSuccess(h, config.toleratedErrors);",
+    replacement:
+      "      analysisSuccess = distanceFraudSuccess(h, config.toleratedErrors);",
+    target: browser(
+      "predictable challenges make the distance-fraud key holder certain",
+    ),
+  },
+  {
+    id: "S06-M15",
+    finding:
+      "The predictable distance-fraud actor must preselect the response to the known challenge, not the opposite register bit.",
+    file: "src/db/scenario.ts",
+    anchor:
+      "            .map((round) => response(registers, round, challenges[round - 1]))",
+    replacement:
+      "            .map((round) => response(registers, round, (1 - challenges[round - 1]) as Bit))",
+    target: browser(
+      "predictable challenges make the distance-fraud key holder certain",
+    ),
   },
 ];
 

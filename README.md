@@ -12,9 +12,9 @@ distance.
 
 The lab runs the original one-nonce, verifier-nonce protocol on **exact BigInt
 rational arithmetic**, computes every attack probability as an exact fraction,
-and drives six actor views: an honest prover, an ordinary authenticated
-exchange that relays perfectly, a Hancke-Kuhn online relay, mafia fraud by
-pre-asking, distance fraud by a dishonest distant key holder, and an honest
+and drives six actor views: an honest prover, an ordinary HMAC-SHA-256
+challenge-response that relays successfully, a Hancke-Kuhn online relay, mafia
+fraud by pre-asking, distance fraud by a dishonest distant key holder, and an honest
 prover on a noisy channel. Four broken controls are available as switches:
 nonce reuse, predictable challenges, disabled timing, and an invalid
 processing-delay lower bound.
@@ -91,6 +91,12 @@ is rejected, with no rounding either side.
 the prover appears nearer than it is. That failure has its own executable
 negative control, and the exact gain is `v (delta_lb - delta_actual) / 2`.
 
+The distance-fraud actor commits to a response before it sees the challenge,
+then begins the return transmission after challenge arrival. The model retains
+both propagation legs and removes only the assumed processing delay. It does
+not model a radio transmission scheduled before challenge arrival or the
+physical synchronization needed for one.
+
 **No browser or machine clock reaches a verdict.** `Date.now`,
 `performance.now`, animation duration and real network latency are read nowhere
 in the model; a unit test scans the model's own source to prove it, with a
@@ -143,6 +149,12 @@ of it. An average cannot tell a learner whether this session is the weak one.
 independent, and the function takes that independence as an explicit argument
 rather than assuming it.
 
+The independent-noise sampler realizes the displayed rational `eps` exactly:
+it rejection-samples a uniform integer in `0..d-1` for reduced `eps = n/d` and
+flips on exactly `n` outcomes. It does not silently replace `eps` by
+`floor(eps * 2^k) / 2^k`. To keep an editable browser input bounded, `d` may be
+at most `2^32`.
+
 ## The attacker knowledge boundary
 
 The relay and mafia actors receive a `ProverOracle` — one function answering one
@@ -151,6 +163,12 @@ registers or the verifier's expected bits, there is no module-level state
 holding any of those, and a unit test reads the attack module's own source to
 confirm it imports no register derivation. A further test runs the complete
 mafia attack against an oracle built from a key the attack code never sees.
+
+The ordinary-authentication contrast separately computes
+`HMAC-SHA-256(K, domain || challenge)`. Its relay receives only the challenge
+oracle, returns the genuine tag, and has no key. A changed-tag negative control
+fails authentication. This is a bounded comparison transcript, not a complete
+deployed authentication protocol.
 
 **Distance fraud is kept separate on purpose.** A distance-fraud actor _is_ the
 legitimate key holder behaving dishonestly at a distance. It is not a relay,
@@ -165,14 +183,17 @@ accounts do — misdescribes both the attacker and the defence.
   radio propagation**.
 - The exact probabilities assume ideal independent PRF output bits, a fresh
   unpredictable verifier nonce, and unpredictable challenges. Where an
-  experiment breaks one of those, the page **withdraws the formula** instead of
-  printing a number that no longer applies.
+  experiment breaks one of those, the page retires the inapplicable formula and
+  prints only a newly justified exact case, if one exists.
 - A **prover-chosen nonce** may allow response-table grinding. Named, not
   modelled.
 - Real jitter, multipath, non-line-of-sight propagation, interference,
   correlated or bursty errors and radio capture effects are **not modelled**.
   The noise model flips each response bit independently, which real channels do
   not.
+- The distance-fraud timing model keeps both propagation legs, begins the return
+  trip after challenge arrival, and omits only processing delay. Scheduled
+  pre-transmission and physical synchronization attacks are outside it.
 - **Early-detect and late-commit** behaviour depends on physical-layer symbol
   timing and sits outside the executable core (Clulow et al. 2006).
 - **Terrorist fraud**, collusion, localisation and production parameter
@@ -224,7 +245,7 @@ npm ci
 npm run ci              # format, typecheck, lint, coverage, build
 npx playwright install chromium
 npm run test:claims     # browser claims, recomputed independently
-npm run test:a11y       # axe, contrast and reflow, both schemes
+npm run test:a11y       # axe, contrast and reflow, pinned dark palette
 npm run test:mutations  # clean-baseline source mutations
 ```
 
@@ -239,12 +260,10 @@ for byte, rebuild to the baseline digest and pass again.
 
 ### Theming
 
-Both colour schemes are complete and contrast-checked, and there is **no theme
-toggle and nothing persisted**: the visitor's operating-system preference is the
-only input, and the accessibility gate scans dark and light separately for that
-reason. The wider Crypto Lab fleet pins a single theme per lab; this lab follows
-its own brief instead, and that divergence is flagged for review rather than
-quietly assumed.
+The lab follows the fleet contract: one dark theme is pinned in the root HTML,
+with no toggle and no stored or operating-system preference that can change it.
+The accessibility gate scans that same pinned palette under both dark and light
+OS preferences so a stray media-query branch cannot escape.
 
 ---
 

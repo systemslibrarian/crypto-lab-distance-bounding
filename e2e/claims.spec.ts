@@ -269,8 +269,17 @@ test("an ordinary authenticated exchange relays and proves no proximity", async 
   await expect(
     page.locator("[data-verdict=authenticated-relay]"),
   ).toContainText("AUTHENTICATED, AND NO PROXIMITY PROVED");
-  const table = await rows(page);
-  expect(table.every((r) => r[2] === r[3])).toBe(true);
+  const challenge = await metricValue(page, "Relayed challenge (128-bit hex)");
+  const tag = await metricValue(page, "Relayed HMAC-SHA-256 tag (hex)");
+  expect(challenge).toMatch(/^[0-9a-f]{32}$/);
+  expect(tag).toMatch(/^[0-9a-f]{64}$/);
+  expect(await metricValue(page, "Altered-tag control")).toBe("REJECTED");
+  expect(await metricValue(page, "Rapid rounds")).toBe("not run");
+  expect(await metricValue(page, "Timing measurement")).toBe("not run");
+  await expect(page.locator("#rounds-table")).toHaveCount(0);
+  await expect(page.locator("#result")).toContainText(
+    "A changed tag is rejected in the executable control tests",
+  );
 });
 
 test("the mafia pre-ask probability matches an independent exact computation", async ({
@@ -431,6 +440,46 @@ test("predictable challenges withdraw the 3/4 figure and succeed with certainty"
   );
 });
 
+test("predictable challenges leave rounds outside a partial pre-ask blind", async ({
+  page,
+}) => {
+  await setControls(page, {
+    scenario: "mafia-preask",
+    rounds: "8",
+    tolerated: "1",
+    preAsk: "4",
+    predictable: true,
+  });
+  await page.locator("#run").click();
+  expect(await metricValue(page, "Exact success for this adversary")).toBe(
+    blind(4, 1),
+  );
+  expect(await metricValue(page, "Exact success for this adversary")).toBe(
+    "5/16",
+  );
+  await expect(page.locator("[data-verdict=caveat]").first()).toContainText(
+    "remaining 4 round(s) are still blind guesses",
+  );
+});
+
+test("predictable challenges make the distance-fraud key holder certain", async ({
+  page,
+}) => {
+  await setControls(page, {
+    scenario: "distance-fraud",
+    rounds: "8",
+    tolerated: "0",
+    predictable: true,
+  });
+  await page.locator("#run").click();
+  expect(await metricValue(page, "Content errors")).toBe("0");
+  expect(await metricValue(page, "Exact success for this adversary")).toBe("1");
+  await expect(page.locator("[data-ensemble]")).toHaveCount(0);
+  await expect(page.locator("[data-verdict=caveat]").first()).toContainText(
+    "preselect every correct response",
+  );
+});
+
 test("a reused nonce withdraws the independent-attempts formula", async ({
   page,
 }) => {
@@ -463,6 +512,15 @@ test("honest noise reports exact acceptance and false rejection", async ({
   const a = 12353145n;
   const b = 4424071n;
   expect(a + b).toBe(16777216n);
+
+  await setControls(page, {
+    rounds: "3",
+    tolerated: "0",
+    epsilon: "1/3",
+  });
+  await page.locator("#run").click();
+  expect(await metricValue(page, "Exact honest acceptance")).toBe("8/27");
+  expect(await metricValue(page, "Exact false rejection")).toBe("19/27");
 });
 
 test("repeated fresh-nonce attempts compound, and a reused nonce withholds them", async ({
@@ -599,4 +657,8 @@ test("distance fraud is never described as a relay or as mafia fraud", async ({
   await expect(result).toContainText("legitimate key holder");
   await expect(result).toContainText("NOT mafia fraud");
   await expect(result).toContainText("no relay and no third party");
+  await expect(result).toContainText("retains both propagation legs");
+  await expect(result).not.toContainText(
+    "answers before the challenge arrives",
+  );
 });

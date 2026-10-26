@@ -19,7 +19,7 @@
  * the type system keeps the two apart.
  */
 import { type Exact, add, div, fromInt, mul, sub } from "./exact";
-import { type Bit, type Registers, response } from "./prf";
+import { type Bit, type BitSource, type Registers, response } from "./prf";
 import { type Answer } from "./protocol";
 import { type RoundTrip, roundTrip, symmetricRoundTrip } from "./timing";
 
@@ -140,6 +140,9 @@ export class MafiaPreAskAttacker {
     fallback: readonly Bit[],
     preAskRounds: number = rounds,
   ) {
+    if (!Number.isInteger(rounds) || rounds < 1) {
+      throw new RangeError("rounds n must be a positive integer");
+    }
     if (
       !Number.isInteger(preAskRounds) ||
       preAskRounds < 0 ||
@@ -149,6 +152,9 @@ export class MafiaPreAskAttacker {
     }
     if (guesses.length < preAskRounds) {
       throw new RangeError("not enough guessed challenges for the pre-ask");
+    }
+    if (fallback.length === 0) {
+      throw new RangeError("at least one fallback bit is required");
     }
     this.#rounds = rounds;
     this.#fallback = fallback;
@@ -195,12 +201,14 @@ export function mafiaRoundTrip(position: MafiaPosition, v: Exact): RoundTrip {
 /* ------------------------------------------------------------------ */
 
 /**
- * A dishonest DISTANT KEY HOLDER answering early.
+ * A dishonest DISTANT KEY HOLDER committing to its response early.
  *
  * THIS IS NOT A RELAY AND NOT MAFIA FRAUD. There is no third party and nothing
- * is forwarded. The legitimate prover simply answers before the challenge
- * reaches it, so the verifier subtracts a processing delay that never happened
- * and credits the prover with a shorter distance than it has.
+ * is forwarded. The legitimate prover chooses its response before learning the
+ * challenge, then starts the return transmission when the challenge arrives.
+ * This bounded timing model therefore retains both propagation legs and removes
+ * only the processing delay the verifier assumed. It does not model a prover
+ * scheduling a radio transmission before challenge arrival.
  *
  * It must commit to a bit without knowing Cᵢ. Where R0ᵢ = R1ᵢ it is right
  * whatever the challenge is; elsewhere it is a coin flip. That is why the
@@ -213,6 +221,9 @@ export class DishonestProver {
   #choiceIndex = 0;
 
   constructor(registers: Registers, choices: readonly Bit[]) {
+    if (choices.length === 0) {
+      throw new RangeError("at least one early-response choice is required");
+    }
     this.#registers = registers;
     this.#choices = choices;
   }
@@ -255,32 +266,45 @@ export class DishonestProver {
  * direction-dependent and shaped by multipath, interference and capture; none
  * of that is modeled, and the lesson says so where the number is displayed.
  *
- * `threshold` is the integer `floor(epsilon · 2^precision)`: a drawn
- * `precision`-bit value strictly below it counts as a corruption, which makes
- * the realized error frequency exact and replayable rather than approximate.
+ * Sampling is exact for the declared rational epsilon. Rejection sampling
+ * draws a uniform integer in 0..d-1 and flips exactly n of those d outcomes;
+ * there is no silent floor(epsilon * 2^k) approximation.
  */
 export interface NoiseModel {
   readonly epsilon: Exact;
-  readonly precision: number;
 }
 
-export function corruptionThreshold(model: NoiseModel): bigint {
-  if (
-    !Number.isInteger(model.precision) ||
-    model.precision < 1 ||
-    model.precision > 32
-  ) {
-    throw new RangeError("noise precision must be an integer in 1..32");
-  }
-  if (model.epsilon.n < 0n || model.epsilon.n > model.epsilon.d) {
+/** Draw an exact Bernoulli(epsilon) outcome from unbiased source bits. */
+export function sampleBernoulli(
+  source: Pick<BitSource, "nextBit">,
+  epsilon: Exact,
+): boolean {
+  if (epsilon.n < 0n || epsilon.n > epsilon.d) {
     throw new RangeError("epsilon must lie in [0, 1]");
   }
-  return (model.epsilon.n * (1n << BigInt(model.precision))) / model.epsilon.d;
+  if (epsilon.d > 0x1_0000_0000n) {
+    throw new RangeError("epsilon denominator must not exceed 2^32");
+  }
+  if (epsilon.n === 0n) return false;
+  if (epsilon.n === epsilon.d) return true;
+
+  const width = (epsilon.d - 1n).toString(2).length;
+  for (;;) {
+    let drawn = 0n;
+    for (let i = 0; i < width; i += 1) {
+      drawn = (drawn << 1n) | BigInt(source.nextBit());
+    }
+    if (drawn < epsilon.d) return drawn < epsilon.n;
+  }
 }
 
-/** Flip `bit` when the drawn value falls below the corruption threshold. */
-export function applyNoise(bit: Bit, drawn: bigint, threshold: bigint): Bit {
-  return drawn < threshold ? ((1 - bit) as Bit) : bit;
+/** Flip one response with exact probability epsilon. */
+export function applyNoise(
+  bit: Bit,
+  source: Pick<BitSource, "nextBit">,
+  epsilon: Exact,
+): Bit {
+  return sampleBernoulli(source, epsilon) ? ((1 - bit) as Bit) : bit;
 }
 
 /* ------------------------------------------------------------------ */
@@ -300,30 +324,32 @@ export interface AuthenticatedRelayResult {
   readonly authenticated: boolean;
   readonly provedProximity: boolean;
   readonly provedDistance: Exact | null;
+  readonly challenge: Uint8Array;
+  readonly relayedTag: Uint8Array;
   readonly note: string;
 }
 
+export type AuthenticatedProverOracle = (challenge: Uint8Array) => Uint8Array;
+
 export function ordinaryAuthenticatedRelay(
-  oracle: ProverOracle,
-  rounds: number,
-  challenges: readonly Bit[],
+  oracle: AuthenticatedProverOracle,
+  challenge: Uint8Array,
+  verify: (challenge: Uint8Array, tag: Uint8Array) => boolean,
 ): AuthenticatedRelayResult {
-  // The relay forwards every challenge and every answer unchanged, so the
-  // transcript is exactly the genuine prover's.
-  let allCorrect = true;
-  for (let round = 1; round <= rounds; round += 1) {
-    const challenge = challenges[round - 1];
-    if (oracle(round, challenge) !== oracle(round, challenge))
-      allCorrect = false;
-  }
+  // The relay gets an oracle, not the shared key. It forwards one fresh
+  // challenge, receives the genuine tag, and returns that tag unchanged.
+  const forwardedChallenge = challenge.slice();
+  const relayedTag = oracle(forwardedChallenge).slice();
   return {
-    authenticated: allCorrect,
+    authenticated: verify(forwardedChallenge, relayedTag),
     provedProximity: false,
     provedDistance: null,
+    challenge: forwardedChallenge,
+    relayedTag,
     note:
-      "The exchange authenticates: the answers came from the key holder. It " +
-      "establishes no upper bound on distance, because nothing in it is timed. " +
-      "A relay therefore succeeds at any separation.",
+      "The HMAC challenge-response authenticates possession of the shared key. " +
+      "It establishes no upper bound on distance, because nothing in it is " +
+      "timed. A relay therefore succeeds at any separation.",
   };
 }
 

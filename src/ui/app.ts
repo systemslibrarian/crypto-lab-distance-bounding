@@ -18,6 +18,7 @@ import {
   runScenario,
   toDecimal,
   toFraction,
+  toHex,
 } from "../db";
 import {
   checkbox,
@@ -46,9 +47,11 @@ const LIMITS = [
   "The exact probabilities assume ideal independent PRF output bits, a fresh unpredictable verifier nonce, and challenge bits the attacker cannot predict. Where an experiment breaks one of those, the page withdraws the formula instead of printing a number that no longer applies.",
   "The paper's optional prover-nonce variant is not implemented. A prover-chosen nonce would let a prover grind for a favourable response table, which is a real risk and is named here rather than modelled.",
   "Real jitter, multipath, non-line-of-sight propagation, interference, correlated or bursty errors and radio capture effects are not modelled. The noise model flips each response bit independently, which real channels do not.",
+  "The exact noise sampler accepts rational error rates whose reduced denominator is at most 2^32; it uses rejection sampling rather than silently rounding the requested probability.",
+  "The distance-fraud actor chooses a response before seeing the challenge but begins its return transmission after challenge arrival. The model retains both propagation legs and omits only processing delay; scheduled pre-transmission and physical synchronization attacks are outside it.",
   "Early-detect and late-commit behaviour depends on physical-layer symbol timing and sits outside this executable core. It is named in the sources, after Clulow et al. 2006.",
   "Terrorist fraud, collusion between a prover and an accomplice, localisation and production parameter selection are all out of scope.",
-  "Authentication and proximity are different properties. Experiment 2 exists to make that concrete: a perfectly authenticated exchange relays without difficulty.",
+  "Authentication and proximity are different properties. Experiment 2 exists to make that concrete: a valid HMAC-SHA-256 challenge-response relays without difficulty, but this teaching transcript is not a complete deployed authentication protocol.",
   "Brands-Chaum is referenced for comparison only. It is not implemented here.",
 ];
 
@@ -207,7 +210,43 @@ function toConfig(controls: Controls): ScenarioConfig {
 
 function render(config: ScenarioConfig, attempts: number): string {
   const result = runScenario(config);
-  const { verdict: outcome, analysis } = result;
+  const { analysis } = result;
+
+  if (result.authenticatedRelay) {
+    const authentication = result.authenticatedRelay;
+    return `
+${verdict(
+  authentication.authenticated ? "bad" : "warn",
+  authentication.authenticated ? "AUTHENTICATED" : "AUTHENTICATION FAILED",
+  "The verifier checked a relayed HMAC response. This untimed exchange has no rapid-bit phase and makes no distance verdict.",
+  "session",
+)}
+${verdict(
+  "bad",
+  "AUTHENTICATED, AND NO PROXIMITY PROVED",
+  authentication.note,
+  "authenticated-relay",
+)}
+${metrics([
+  ["Relayed challenge (128-bit hex)", toHex(authentication.challenge)],
+  ["Relayed HMAC-SHA-256 tag (hex)", toHex(authentication.relayedTag)],
+  [
+    "Altered-tag control",
+    result.authenticationTamperRejected ? "REJECTED" : "FAILED OPEN",
+  ],
+  ["Rapid rounds", "not run"],
+  ["Timing measurement", "not run"],
+])}
+<h3>Ordinary authentication transcript</h3>
+<p class="note">The relay receives only a challenge oracle, not the shared key. It forwards the verifier's challenge to the genuine key holder and returns that holder's tag unchanged. A changed tag is rejected in the executable control tests.</p>
+<h3>What happened</h3>
+${result.notes.map((note) => `<p class="note">${escape(note)}</p>`).join("")}`;
+  }
+
+  if (!result.verdict) {
+    throw new Error("rapid scenario produced no distance-bounding verdict");
+  }
+  const outcome = result.verdict;
 
   const headline = outcome.accepted
     ? verdict(
@@ -282,16 +321,6 @@ function render(config: ScenarioConfig, attempts: number): string {
     : "";
 
   const extra: string[] = [];
-  if (result.authenticatedRelay) {
-    extra.push(
-      verdict(
-        "bad",
-        "AUTHENTICATED, AND NO PROXIMITY PROVED",
-        result.authenticatedRelay.note,
-        "authenticated-relay",
-      ),
-    );
-  }
   if (config.scenario === "online-relay") {
     extra.push(
       `<p class="note" data-relay-excess>The relay path overshoots the accepted threshold by <span class="mono">${escape(toFraction(relayExcess(config)))}</span> time units in every round.</p>`,

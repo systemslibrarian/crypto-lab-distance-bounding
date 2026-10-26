@@ -1,15 +1,12 @@
 /*
- * Both colour schemes are complete and contrast-checked. There is NO theme
- * toggle and nothing is persisted: the visitor's operating-system preference
- * decides, through prefers-color-scheme, and that is the only input.
+ * The fleet contract pins one dark theme. There is no toggle and no stored or
+ * operating-system preference that can silently change the learner palette.
  *
  * Every colour below is a token defined once on :root for the dark scheme and
- * redefined wholesale for light, so no rule anywhere else in this file has a
- * scheme-specific literal that could drift out of contrast when only one half
- * is edited.
+ * no rule elsewhere needs to branch on a second palette.
  */
 :root {
-  color-scheme: dark light;
+  color-scheme: dark;
 
   --accent: #35d6bb;
   --bg: #071311;
@@ -33,26 +30,6 @@
   --radius: 12px;
   --gap: clamp(0.75rem, 2vw, 1.25rem);
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --accent: #0f6f5c;
-    --bg: #f4fbf8;
-    --panel: #ffffff;
-    --panel-2: #eaf5f1;
-    --ink: #0a1f1a;
-    --ink-dim: #40584f;
-    --line: #c3ded5;
-    --control-line: #4d726a;
-    --ok: #0b6b33;
-    --ok-ink: #e8fff1;
-    --bad: #9a1c1c;
-    --bad-ink: #fff0f0;
-    --warn: #7a5200;
-    --warn-ink: #fff8e6;
-    --focus: #0f6f5c;
-  }
 }
 
 * {
