@@ -254,7 +254,7 @@ Coverage thresholds for `src/db/**` are statements 95, branches 90, functions
 recompute the threshold, the round trips, the register distance and every
 displayed probability with arithmetic written inside the test file, so a figure
 is checked against an independent computation rather than against the code that
-produced it. Eleven source mutations must each build, move the bundle bytes,
+produced it. Fifteen source mutations must each build, move the bundle bytes,
 fail one **named** owning assertion as an ordinary test failure, restore byte
 for byte, rebuild to the baseline digest and pass again.
 
