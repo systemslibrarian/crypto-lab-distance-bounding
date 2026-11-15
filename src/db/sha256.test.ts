@@ -11,8 +11,10 @@ import {
 } from "./sha256";
 
 describe("SHA-256", () => {
-  it("matches the published FIPS 180-4 one-block and two-block examples", () => {
-    // FIPS 180-4, Appendix B.1 and B.2.
+  it("matches NIST's published one-block and two-block SHA-256 examples", () => {
+    // NIST, "Examples with Intermediate Values", SHA256.pdf: the one-block and
+    // two-block message samples. FIPS 180-4 itself prints no digests; its
+    // Appendix A.2 points to that page.
     expect(toHex(sha256(utf8("abc")))).toBe(
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );

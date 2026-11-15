@@ -54,9 +54,10 @@ R0 || R1 = first 2n bits of block_0 || block_1 || ...
 Bits are taken most significant first within each byte; the first `n` are `R0`
 and the next `n` are `R1`. SHA-256 and HMAC are hand-rolled so the model stays
 synchronous and exactly replayable, and both are pinned against published
-vectors: FIPS 180-4 Appendix B for SHA-256, RFC 4231 for HMAC, plus an
-independent cross-check against Node's own implementation across every padding
-boundary.
+vectors: NIST's SHA-256 "examples with intermediate values" (the one-block and
+two-block messages FIPS 180-4 Appendix A.2 points to) for SHA-256, RFC 4231 for
+HMAC, plus an independent cross-check against Node's own implementation across
+every padding boundary.
 
 ## Timing, in exact arithmetic
 
@@ -223,7 +224,8 @@ Read rather than summarised; the sections used are listed on the page itself.
   and late-commit, named and left outside the executable core.
 - **G. Avoine, M. A. Bingöl, S. Kardaş, C. Lauradoux and B. Martin, "A Framework
   for Analyzing RFID Distance Bounding Protocols", Journal of Computer
-  Security, 2010.**
+  Security, vol. 19, no. 2, 2011, pp. 289-317, DOI
+  [10.3233/JCS-2010-0408](https://doi.org/10.3233/JCS-2010-0408).**
   [PDF](https://sites.uclouvain.be/security/download/papers/AvoineBKLM-2010-jcs.pdf).
   The adversary vocabulary, including the separation of mafia fraud from
   distance fraud.
@@ -235,6 +237,25 @@ Read rather than summarised; the sections used are listed on the page itself.
 - **D. Singelée and B. Preneel, "Distance Bounding in Noisy Environments".**
   [PDF](https://cosicdatabase.esat.kuleuven.be/backend/publications/files/conferencepaper/919).
   Tolerating channel errors without handing the attacker the allowance.
+- **NIST, Cryptographic Standards and Guidelines, "Examples with Intermediate
+  Values": SHA-256.**
+  [Page](https://csrc.nist.gov/projects/cryptographic-standards-and-guidelines/example-values),
+  [PDF](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/SHA256.pdf).
+  The one-block (`"abc"`) and two-block SHA-256 digests pinned in
+  `src/db/sha256.test.ts`.
+
+**Standards reviewed 15 November 2026:** the SHA-256 vectors were previously
+credited to "FIPS 180-4 Appendix B".
+[FIPS 180-4](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) prints
+no example digests: its Appendix B is the reference list, and its Appendix A.2
+points to the NIST examples page above, which is where the one-block and
+two-block digests come from.
+
+**Citations reviewed 15 November 2026:** the Avoine, Bingöl, Kardaş, Lauradoux
+and Martin framework paper was previously cited as "Journal of Computer
+Security, 2010". Resolving its DOI gives the journal issue: _Journal of
+Computer Security_ 19(2), 2011, pp. 289-317. The 2010 in the DOI string and in
+the authors' preprint file name is not the issue year.
 
 ## Build and verify
 

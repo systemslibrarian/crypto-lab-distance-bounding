@@ -2,10 +2,10 @@
  * Synchronous SHA-256 and HMAC-SHA-256.
  *
  * WHY THIS EXISTS RATHER THAN WebCrypto: the whole model is synchronous and
- * exactly replayable, and the unit tests pin published vectors (FIPS 180-4 for
- * SHA-256, RFC 4231 for HMAC-SHA-256). An async primitive would force the
- * protocol core to be async for no teaching benefit and would make the
- * deterministic replay harder to reason about.
+ * exactly replayable, and the unit tests pin published vectors (NIST's SHA-256
+ * examples with intermediate values for SHA-256, RFC 4231 for HMAC-SHA-256). An
+ * async primitive would force the protocol core to be async for no teaching
+ * benefit and would make the deterministic replay harder to reason about.
  *
  * WHAT THIS IS NOT: the Hancke-Kuhn paper does NOT mandate SHA-256, HMAC, or
  * any wire format. Section 3.2 says only that h "may in a typical
