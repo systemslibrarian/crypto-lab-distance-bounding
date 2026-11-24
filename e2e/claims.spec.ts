@@ -662,3 +662,31 @@ test("distance fraud is never described as a relay or as mafia fraud", async ({
     "answers before the challenge arrives",
   );
 });
+
+test("a missing tolerance is refused while zero is a valid tolerance", async ({
+  page,
+}) => {
+  await page.goto("./");
+  await page.locator("#tolerated").fill("");
+  await page.locator("#run").click();
+  await expect(page.getByText("Input refused", { exact: true })).toBeVisible();
+  await page.locator("#tolerated").fill("0");
+  await page.locator("#run").click();
+  await expect(page.getByText("Input refused", { exact: true })).toHaveCount(0);
+  expect(await metricValue(page, "Late rounds")).toBe("0");
+});
+
+test("the timing explanation follows the sign of the measured difference", async ({
+  page,
+}) => {
+  await page.goto("./");
+  await page.locator("#scenario").selectOption("distance-fraud");
+  for (const [delay, expected] of [
+    ["2", "equals the modeled distance"],
+    ["3", "exceeds the modeled distance"],
+  ]) {
+    await page.locator("#fraudDelay").fill(delay);
+    await page.locator("#run").click();
+    await expect(page.locator("[data-fraud-gain]")).toContainText(expected);
+  }
+});

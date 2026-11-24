@@ -160,21 +160,23 @@ function shell(): string {
 function readControls(): Controls {
   const value = (id: string): string =>
     el<HTMLInputElement>(`#${id}`).value.trim();
+  const number = (id: string): number =>
+    el<HTMLInputElement>(`#${id}`).valueAsNumber;
   const checked = (id: string): boolean =>
     el<HTMLInputElement>(`#${id}`).checked;
   return {
     scenario: el<HTMLSelectElement>("#scenario").value as ScenarioName,
-    rounds: Number(value("rounds")),
-    toleratedErrors: Number(value("tolerated")),
+    rounds: number("rounds"),
+    toleratedErrors: number("tolerated"),
     range: value("range"),
     deltaLb: value("deltaLb"),
     speed: value("speed"),
     relayLink: value("relayLink"),
     fraudDistance: value("fraudDistance"),
     fraudDelay: value("fraudDelay"),
-    preAskRounds: Number(value("preAsk")),
+    preAskRounds: number("preAsk"),
     epsilon: value("epsilon"),
-    attempts: Number(value("attempts")),
+    attempts: number("attempts"),
     seed: value("seed"),
     timingEnforced: checked("timing"),
     predictableChallenges: checked("predictable"),
@@ -323,12 +325,13 @@ ${result.notes.map((note) => `<p class="note">${escape(note)}</p>`).join("")}`;
   const extra: string[] = [];
   if (config.scenario === "online-relay") {
     extra.push(
-      `<p class="note" data-relay-excess>The relay path overshoots the accepted threshold by <span class="mono">${escape(toFraction(relayExcess(config)))}</span> time units in every round.</p>`,
+      `<p class="note" data-relay-excess>Modeled round-trip time minus the acceptance threshold is <span class="mono">${escape(toFraction(relayExcess(config)))}</span> time units in every round.</p>`,
     );
   }
   if (config.scenario === "distance-fraud") {
+    const gain = fraudGain(config);
     extra.push(
-      `<p class="note" data-fraud-gain>Answering in <span class="mono">${escape(toFraction(config.fraudDelay))}</span> instead of the trusted floor <span class="mono">${escape(toFraction(config.profile.deltaLb))}</span> makes the prover look <span class="mono">${escape(toFraction(fraudGain(config)))}</span> distance units nearer than it is. The displayed bound stops being an upper bound exactly here.</p>`,
+      `<p class="note" data-fraud-gain>True distance minus the displayed bound is <span class="mono">${escape(toFraction(gain))}</span> distance units. ${gain.n > 0n ? "The displayed value stops being an upper bound for this run." : gain.n === 0n ? "The displayed bound equals the modeled distance." : "The displayed bound exceeds the modeled distance."}</p>`,
     );
   }
 
@@ -385,6 +388,18 @@ export function mount(root: HTMLElement): void {
   const run = (): void => {
     try {
       const controls = readControls();
+      if (
+        ![
+          controls.rounds,
+          controls.toleratedErrors,
+          controls.preAskRounds,
+          controls.attempts,
+        ].every(Number.isInteger)
+      ) {
+        throw new Error(
+          "Enter a whole number in each count field. Enter 0 explicitly when zero is intended.",
+        );
+      }
       output.innerHTML = render(toConfig(controls), controls.attempts);
       lastSignature = JSON.stringify(controls);
       staleNote.textContent = "";
