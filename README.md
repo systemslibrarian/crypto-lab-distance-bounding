@@ -5,8 +5,7 @@ Executable distance-bounding and relay-attack teaching lab with deterministic ti
 ## What It Is
 
 A browser-only lesson in the gap between **authentication** and **proximity**. A
-verifier can confirm it is talking to the right key holder and still have no
-idea where that key holder is. Hancke and Kuhn's 2005 protocol closes that gap
+verifier can authenticate the key holder without establishing their exact physical location. Hancke and Kuhn's 2005 protocol closes that gap
 by timing a rapid single-bit exchange, so the round trip itself bounds the
 distance.
 
@@ -181,7 +180,7 @@ accounts do — misdescribes both the attacker and the defence.
 - It is an **arithmetic and event simulator**, not ranging hardware, and it
   contains no radio.
 - It **does not establish physical location** and **does not measure nanosecond
-  radio propagation**.
+  radio propagation**. Real transcripts can still reveal location information through timing. This simulator does not evaluate location privacy.
 - The exact probabilities assume ideal independent PRF output bits, a fresh
   unpredictable verifier nonce, and unpredictable challenges. Where an
   experiment breaks one of those, the page retires the inapplicable formula and
